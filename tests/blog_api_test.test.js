@@ -2,113 +2,148 @@ const mongoose = require('mongoose');
 const supertest = require('supertest');
 const app = require('../app');
 const Blog = require('../models/blog');
+const helper = require('./test_helper');
 
 const api = supertest(app);
-
-const initialBlogs = [
-  [
-    {
-      title: 'This is blog number 1',
-      author: 'Nils Matic',
-      url: 'www.test.example.com',
-      likes: 23,
-    },
-    {
-      title: 'This is blog number 2',
-      author: 'Nils Matic',
-      url: 'www.example.com',
-      likes: 10,
-    },
-    {
-      title: 'This is blog number 3',
-      author: 'Timo Matic',
-      url: 'www.example.com',
-      likes: 7,
-    },
-  ],
-];
 
 beforeEach(async () => {
   await Blog.deleteMany({});
 
-  const blogObjects = initialBlogs.map((blog) => new Blog(blog));
-  const promiseArray = blogObjects.map((blog) => blog.save());
-  await Promise.all(promiseArray);
+  for (let blog of helper.initialBlogs) {
+    let blogObject = new Blog(blog);
+    await blogObject.save();
+  }
 });
 
-test('all blogs are returned', async () => {
-  const response = await api.get('/api/blogs');
-  expect(response.body).toHaveLength(initialBlogs.length);
+describe('fetching all notes', () => {
+  test('blogs are returned as json', async () => {
+    await api
+      .get('/api/blogs')
+      .expect(200)
+      .expect('Content-Type', /application\/json/);
+  });
+
+  test('all blogs are returned', async () => {
+    const response = await api.get('/api/blogs');
+    expect(response.body).toHaveLength(helper.initialBlogs.length);
+  });
 });
 
-test('unique identifier is called "id", not "_id"', async () => {
-  const blogs = await api
-    .get('/api/blogs')
-    .expect(200)
-    .expect('Content-Type', /application\/json/);
+describe('viewing a specific note', () => {
+  test('succeeds with a valid id', async () => {
+    const blogsAtStart = await helper.blogsInDb();
 
-  expect(blogs.body[0].id.toBeDefined);
-  expect(blogs.body[0]['_id']?.not.toBeDefined);
+    const blogToView = blogsAtStart[0];
+
+    const resultBlog = await api
+      .get(`/api/blogs/${blogToView.id}`)
+      .expect(200)
+      .expect('Content-Type', /application\/json/);
+
+    expect(resultBlog.body).toEqual(blogToView);
+  });
+
+  test('unique identifier is called "id", not "_id"', async () => {
+    const blogs = await api
+      .get('/api/blogs')
+      .expect(200)
+      .expect('Content-Type', /application\/json/);
+
+    expect(blogs.body[0].id.toBeDefined);
+    expect(blogs.body[0]['_id']?.not.toBeDefined);
+  });
 });
 
-test('new blog gets posted successfully', async () => {
-  const blogToAdd = {
-    title: 'This is a blog to be added',
-    author: 'Nils Matic',
-    url: 'www.google.com',
-    likes: 0,
-  };
+describe('addition of new blog', () => {
+  test('new blog gets posted successfully', async () => {
+    const blogToAdd = {
+      title: 'This is a blog to be added',
+      author: 'Nils Matic',
+      url: 'www.google.com',
+      likes: 0,
+    };
 
-  await api
-    .post('/api/blogs')
-    .send(blogToAdd)
-    .expect('Content-Type', /application\/json/);
+    await api
+      .post('/api/blogs')
+      .send(blogToAdd)
+      .expect('Content-Type', /application\/json/);
 
-  const blogsAtEnd = await Blog.find({});
+    const blogsAtEnd = await helper.blogsInDb();
 
-  expect(blogsAtEnd.length).toBe(initialBlogs.length + 1);
-  const titles = blogsAtEnd.map((b) => b.title);
-  expect(titles).toContain(blogToAdd.title);
+    expect(blogsAtEnd.length).toBe(helper.initialBlogs.length + 1);
+    const titles = blogsAtEnd.map((b) => b.title);
+    expect(titles).toContain(blogToAdd.title);
+  });
+
+  test('if likes property is missing gets dafaulted to 0', async () => {
+    const blogToAdd = {
+      title: 'This is a blog to be added',
+      author: 'Nils Matic',
+      url: 'www.google.com',
+    };
+
+    await api
+      .post('/api/blogs')
+      .send(blogToAdd)
+      .expect('Content-Type', /application\/json/);
+
+    const blogsAtEnd = await helper.blogsInDb();
+
+    expect(blogsAtEnd.length).toBe(helper.initialBlogs.length + 1);
+    expect(blogsAtEnd[blogsAtEnd.length - 1].likes).toBe(0);
+  });
+
+  test('if title or url property is missing in POST request, return status 400', async () => {
+    const titleMissing = {
+      author: 'Nils Matic',
+      url: 'www.google.com',
+      likes: 4,
+    };
+
+    const urlMissing = {
+      title: 'The url is missing from this blog',
+      author: 'Nils Matic',
+      likes: 8,
+    };
+
+    await api.post('/api/blogs').send(titleMissing).expect(400);
+
+    await api.post('/api/blogs').send(urlMissing).expect(400);
+
+    const blogsAtEnd = await helper.blogsInDb();
+
+    expect(blogsAtEnd.length).toBe(helper.initialBlogs.length);
+  });
 });
 
-test('if likes property is missing gets dafaulted to 0', async () => {
-  const blogToAdd = {
-    title: 'This is a blog to be added',
-    author: 'Nils Matic',
-    url: 'www.google.com',
-  };
+describe('deletion of a note', () => {
+  test('succeeds with status of 204 if id is valid', async () => {
+    const blogsAtStart = await helper.blogsInDb();
+    const blogToDelete = blogsAtStart[0];
 
-  await api
-    .post('/api/blogs')
-    .send(blogToAdd)
-    .expect('Content-Type', /application\/json/);
+    await api.delete(`/api/blogs/${blogToDelete.id}`).expect(204);
 
-  const blogsAtEnd = await Blog.find({});
+    const blogsAtEnd = await helper.blogsInDb();
 
-  expect(blogsAtEnd.length).toBe(initialBlogs.length + 1);
-  expect(blogsAtEnd[blogsAtEnd.length - 1].likes).toBe(0);
+    expect(blogsAtEnd).toHaveLength(helper.initialBlogs.length - 1);
+
+    const titles = blogsAtEnd.map((b) => b.title);
+
+    expect(titles).not.toContain(blogToDelete.title);
+  });
 });
 
-test('if title or url property is missing in POST request, return status 400', async () => {
-  const titleMissing = {
-    author: 'Nils Matic',
-    url: 'www.google.com',
-    likes: 4,
-  };
+describe('updating a note', () => {
+  test('increasing likes on a blog works', async () => {
+    const blogsAtStart = await helper.blogsInDb();
+    const blogToUpdate = { ...blogsAtStart[0], likes: 0 };
 
-  const urlMissing = {
-    title: 'The url is missing from this blog',
-    author: 'Nils Matic',
-    likes: 8,
-  };
+    await api.put(`/api/blogs/${blogToUpdate.id}`).send(blogToUpdate);
 
-  await api.post('/api/blogs').send(titleMissing).expect(400);
+    const blogsAtEnd = await helper.blogsInDb();
 
-  await api.post('/api/blogs').send(urlMissing).expect(400);
-
-  const blogsAtEnd = await Blog.find({});
-
-  expect(blogsAtEnd.length).toBe(initialBlogs.length);
+    expect(blogsAtEnd[0].likes).toBe(0);
+  });
 });
 
 afterAll(async () => {
