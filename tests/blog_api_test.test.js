@@ -89,6 +89,28 @@ test('if likes property is missing gets dafaulted to 0', async () => {
   expect(blogsAtEnd[blogsAtEnd.length - 1].likes).toBe(0);
 });
 
+test('if title or url property is missing in POST request, return status 400', async () => {
+  const titleMissing = {
+    author: 'Nils Matic',
+    url: 'www.google.com',
+    likes: 4,
+  };
+
+  const urlMissing = {
+    title: 'The url is missing from this blog',
+    author: 'Nils Matic',
+    likes: 8,
+  };
+
+  await api.post('/api/blogs').send(titleMissing).expect(400);
+
+  await api.post('/api/blogs').send(urlMissing).expect(400);
+
+  const blogsAtEnd = await Blog.find({});
+
+  expect(blogsAtEnd.length).toBe(initialBlogs.length);
+});
+
 afterAll(async () => {
   await mongoose.connection.close();
 });
